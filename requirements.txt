@@ -4,6 +4,6 @@ prophet
 plotly
 pandas
 scikit-learn
-numpy
+numpy==1.26.4 # Pinning numpy to a 1.x version to resolve NaN import error
 pandas_ta
-setuptools # Explicitly adding setuptools
+setuptools
