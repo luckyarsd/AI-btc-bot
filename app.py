@@ -11,12 +11,9 @@ from transformers import pipeline
 import datetime
 import pytz
 
-# Configuration
 SYMBOL = "BTCUSDT"
-CRYPTOPANIC_API_KEY = st.secrets.get("CRYPTOPANIC_API_KEY", "062951aa1cbb5e40ed898a90a48b6eb1bcf3f8a7")
-DUNE_API_KEY = st.secrets.get("DUNE_API_KEY", "FVcUCl0ojdQWxpUzB2pl11A3fDr5aRGv")
+CRYPTOPANIC_API_KEY = st.secrets.get("062951aa1cbb5e40ed898a90a48b6eb1bcf3f8a7", "")
 
-# Fetch Binance OHLCV
 @st.cache_data(ttl=300)
 def fetch_binance_ohlcv(symbol, interval, limit=100):
     try:
@@ -30,10 +27,9 @@ def fetch_binance_ohlcv(symbol, interval, limit=100):
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         return df
     except Exception as e:
-        st.error(f"Error fetching Binance data: {e}")
+        st.error(f"Binance data fetch failed: {e}")
         return pd.DataFrame()
 
-# Apply indicators
 def apply_indicators(df):
     if df.empty:
         return df
@@ -45,7 +41,6 @@ def apply_indicators(df):
         df['macd'], df['macd_signal'] = macd.macd(), macd.macd_signal()
         df['atr'] = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close'], window=14).average_true_range()
         df['adx'] = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14).adx()
-        # True Supertrend
         df['upperband'] = ((df['high'] + df['low']) / 2) + (3 * df['atr'])
         df['lowerband'] = ((df['high'] + df['low']) / 2) - (3 * df['atr'])
         df['supertrend'] = df['close'].copy()
@@ -53,10 +48,9 @@ def apply_indicators(df):
             df['supertrend'].iloc[i] = df['lowerband'].iloc[i] if df['close'].iloc[i-1] > df['upperband'].iloc[i-1] else df['upperband'].iloc[i]
         return df
     except Exception as e:
-        st.error(f"Error applying indicators: {e}")
+        st.error(f"Indicator calculation failed: {e}")
         return df
 
-# Detect engulfing
 def detect_engulfing(df):
     if len(df) < 2:
         return None
@@ -72,7 +66,6 @@ def detect_engulfing(df):
     except:
         return None
 
-# News sentiment with Hugging Face
 async def fetch_news_sentiment():
     url = f"https://cryptopanic.com/api/v1/posts/?auth_token={CRYPTOPANIC_API_KEY}¤cies=BTC&public=true"
     try:
@@ -91,26 +84,9 @@ async def fetch_news_sentiment():
         st.warning(f"News sentiment failed: {e}. Using neutral score.")
         return 0, []
 
-# Dune Analytics for on-chain data (exchange netflow)
 async def fetch_onchain_data():
-    try:
-        url = "https://api.dune.com/api/v1/query/1234567/execute"  # Replace with your Dune query ID
-        headers = {"X-Dune-API-Key": DUNE_API_KEY}
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, timeout=10) as resp:
-                resp.raise_for_status()
-                execution_id = (await resp.json())['execution_id']
-            result_url = f"https://api.dune.com/api/v1/execution/{execution_id}/results"
-            async with session.get(result_url, headers=headers, timeout=10) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-                netflow = data['result']['rows'][-1].get('netflow', 0)  # Adjust based on query
-                return 1 if netflow < -100000 else -1 if netflow > 100000 else 0
-    except Exception as e:
-        st.warning(f"On-chain data failed: {e}. Using neutral score.")
-        return 0
+    return 0  # Fallback until Dune query is fixed
 
-# Prepare ML features
 def prepare_features(df_5m, df_1h, df_4h, news_score, onchain_score):
     engulf = 1 if detect_engulfing(df_5m) == 'bullish' else -1 if detect_engulfing(df_5m) == 'bearish' else 0
     features = {
@@ -128,7 +104,6 @@ def prepare_features(df_5m, df_1h, df_4h, news_score, onchain_score):
     }
     return pd.DataFrame([features])
 
-# Train ML model
 @st.cache_resource
 def train_ml_model(df_5m, df_1h, df_4h, news_score):
     try:
@@ -146,7 +121,6 @@ def train_ml_model(df_5m, df_1h, df_4h, news_score):
         st.error(f"ML model training failed: {e}")
         return None
 
-# Dynamic threshold
 def dynamic_threshold(df_5m):
     if df_5m.empty:
         return 0.8
@@ -159,7 +133,6 @@ def dynamic_threshold(df_5m):
         return base_threshold - 0.1
     return base_threshold
 
-# Generate signal
 def ml_signal(df_5m, df_1h, df_4h, news_score, onchain_score, model):
     if model is None or df_5m.empty:
         return 'WAIT', 0.5
@@ -167,12 +140,10 @@ def ml_signal(df_5m, df_1h, df_4h, news_score, onchain_score, model):
     prob = model.predict_proba(features)[0][1]
     return 'BUY' if prob > 0.8 else 'SELL' if prob < 0.2 else 'WAIT', prob
 
-# Streamlit app
 async def main():
     st.set_page_config(page_title="BTC/USDT Trading Dashboard", layout="wide")
     st.title("🌟 BTC/USDT Trading Dashboard 🌟")
     
-    # Fetch data
     with st.spinner("Fetching market data..."):
         df_5m = apply_indicators(fetch_binance_ohlcv(SYMBOL, "5m"))
         df_1h = apply_indicators(fetch_binance_ohlcv(SYMBOL, "1h"))
@@ -180,29 +151,22 @@ async def main():
         news_score, headlines = await fetch_news_sentiment()
         onchain_score = await fetch_onchain_data()
     
-    # Train model
     model = train_ml_model(df_5m, df_1h, df_4h, news_score)
-    
-    # Generate signal
     signal, prob = ml_signal(df_5m, df_1h, df_4h, news_score, onchain_score, model)
     threshold = dynamic_threshold(df_5m)
     if signal != 'WAIT' and prob < threshold:
         signal = 'WAIT'
     
-    # Risk management
-    last = df_5m.iloc[-1] if not df_5m.empty else {'close': 0, 'atr': 0}
+    last = df_5m.iloc[-1] if not df_5m.empty else {'close': 0, 'atr': 0, 'rsi': 0, 'macd': 0}
     sl = last['close'] - 2 * last['atr'] if signal == 'BUY' else last['close'] + 2 * last['atr'] if signal == 'SELL' else None
     tp = last['close'] + 4 * last['atr'] if signal == 'BUY' else last['close'] - 4 * last['atr'] if signal == 'SELL' else None
     
-    # Layout
     col1, col2 = st.columns([2, 1])
     with col1:
         st.subheader("📊 Candlestick Chart")
         if not df_5m.empty:
             fig = go.Figure(data=[
-                go.Candlestick(x=df_5m['timestamp'], open=df_5m['open'], high=df_5m['high'], low=df_5m '
-
-System: low', close=df_5m['close']),
+                go.Candlestick(x=df_5m['timestamp'], open=df_5m['open'], high=df_5m['high'], low=df_5m['low'], close=df_5m['close']),
                 go.Scatter(x=df_5m['timestamp'], y=df_5m['supertrend'], name="Supertrend", line=dict(color='purple'))
             ])
             fig.update_layout(xaxis_rangeslider_visible=False)
@@ -217,8 +181,8 @@ System: low', close=df_5m['close']),
         if signal != 'WAIT' and sl is not None and tp is not None:
             st.markdown(f"**Stop Loss**: ${sl:.2f}")
             st.markdown(f"**Take Profit**: ${tp:.2f}")
-        st.markdown(f"**RSI**: {last.get('rsi', 0):.2f}")
-        st.markdown(f"**MACD**: {last.get('macd', 0):.4f}")
+        st.markdown(f"**RSI**: {last['rsi']:.2f}")
+        st.markdown(f"**MACD**: {last['macd']:.4f}")
         st.markdown(f"**News Sentiment**: {news_score:.2f}")
         st.markdown(f"**On-Chain Score**: {onchain_score}")
         st.markdown("**Top News**:")
@@ -230,7 +194,7 @@ System: low', close=df_5m['close']),
     
     st.markdown(f"**Last Updated**: {datetime.datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S IST')}")
     st.button("🔄 Refresh")
-    st.info("Note: ML model is trained on limited data. For >80% accuracy, backtest with historical data.")
+    st.info("For >80% accuracy, backtest with historical data.")
 
 if __name__ == "__main__":
     asyncio.run(main())
