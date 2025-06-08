@@ -1,0 +1,28 @@
+    # .streamlit/config.toml
+
+    [server]
+    headless = true
+    enableCORS = false
+    port = 8501
+
+    [logger]
+    level = "info"
+
+    [browser]
+    gatherUsageStats = false
+
+    [client]
+    toolbarMode = "minimal"
+
+    [global]
+    dataFrameSerialization = "legacy"
+
+    [runner]
+    magicEnabled = true
+    fastReruns = false
+    installTracer = false
+
+    # Explicitly set a compatible Python version
+    # Python 3.12 is generally more stable for libraries like pandas_ta and numpy
+    python_version = "3.12"
+    
