@@ -7,12 +7,11 @@ import asyncio
 import ta
 import plotly.graph_objects as go
 from xgboost import XGBClassifier
-from transformers import pipeline
 import datetime
 import pytz
 
 SYMBOL = "BTCUSDT"
-CRYPTOPANIC_API_KEY = st.secrets.get("062951aa1cbb5e40ed898a90a48b6eb1bcf3f8a7", "")
+CRYPTOPANIC_API_KEY = st.secrets.get("CRYPTOPANIC_API_KEY", "062951aa1cbb5e40ed898a90a48b6eb1bcf3f8a7")
 
 @st.cache_data(ttl=300)
 def fetch_binance_ohlcv(symbol, interval, limit=100):
@@ -67,21 +66,16 @@ def detect_engulfing(df):
         return None
 
 async def fetch_news_sentiment():
-    url = f"https://cryptopanic.com/api/v1/posts/?auth_token={CRYPTOPANIC_API_KEY}¤cies=BTC&public=true"
+    url = f"https://cryptopanic.com/api/v1/posts/?auth_token={CRYPTOPANIC_API_KEY}&currencies=BTC&public=true"
     try:
-        sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=10) as resp:
                 resp.raise_for_status()
                 data = await resp.json()
                 headlines = [post['title'] for post in data['results'][:10]]
-                score = 0
-                for h in headlines:
-                    result = sentiment_analyzer(h)[0]
-                    score += result['score'] if result['label'] == 'POSITIVE' else -result['score']
-                return score, headlines
+                return 0, headlines  # Neutral score without NLP
     except Exception as e:
-        st.warning(f"News sentiment failed: {e}. Using neutral score.")
+        st.warning(f"News fetch failed: {e}. Using neutral score.")
         return 0, []
 
 async def fetch_onchain_data():
