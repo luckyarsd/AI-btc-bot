@@ -9,25 +9,41 @@ import plotly.graph_objects as go
 from xgboost import XGBClassifier
 import datetime
 import pytz
+import time
 
 SYMBOL = "BTCUSDT"
 CRYPTOPANIC_API_KEY = st.secrets.get("CRYPTOPANIC_API_KEY", "062951aa1cbb5e40ed898a90a48b6eb1bcf3f8a7")
 
 @st.cache_data(ttl=300)
 def fetch_binance_ohlcv(symbol, interval, limit=100):
-    try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume', 'number_of_trades', 'taker_buy_base', 'taker_buy_quote', 'ignore'])
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            df[col] = df[col].astype(float)
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        return df
-    except Exception as e:
-        st.error(f"Binance data fetch failed: {e}")
-        return pd.DataFrame()
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    proxies = [
+        None,  # Direct request
+        {"http": "http://us-proxy:8080", "https": "http://us-proxy:8080"},  # Example proxy (replace with real proxy)
+        {"http": "http://eu-proxy:8080", "https": "http://eu-proxy:8080"},  # Example proxy (replace with real proxy)
+    ]
+    for attempt in range(3):
+        for proxy in proxies:
+            try:
+                response = requests.get(url, timeout=10, proxies=proxy)
+                response.raise_for_status()
+                data = response.json()
+                df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume', 'number_of_trades', 'taker_buy_base', 'taker_buy_quote', 'ignore'])
+                for col in ['open', 'high', 'low', 'close', 'volume']:
+                    df[col] = df[col].astype(float)
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                return df
+            except requests.exceptions.HTTPError as e:
+                if "451" in str(e):
+                    st.warning(f"Binance 451 Error (Attempt {attempt+1}/3, Proxy: {proxy}). Retrying...")
+                    time.sleep(2)
+                else:
+                    st.error(f"Binance data fetch failed: {e}")
+            except Exception as e:
+                st.error(f"Binance data fetch failed: {e}")
+        time.sleep(5)  # Wait before retrying all proxies
+    st.error("All Binance fetch attempts failed. Using empty DataFrame.")
+    return pd.DataFrame()
 
 def apply_indicators(df):
     if df.empty:
