@@ -6,3 +6,4 @@ pandas
 scikit-learn
 numpy
 pandas_ta
+setuptools # Explicitly adding setuptools
