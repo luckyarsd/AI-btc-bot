@@ -13,58 +13,73 @@ import pytz
 
 # Configuration
 SYMBOL = "BTCUSDT"
-CRYPTOPANIC_API_KEY = "YOUR_CRYPTOPANIC_API_KEY"  # Replace
-GLASSNODE_API_KEY = "YOUR_GLASSNODE_API_KEY"      # Replace or set to None
+CRYPTOPANIC_API_KEY = st.secrets.get("CRYPTOPANIC_API_KEY", "062951aa1cbb5e40ed898a90a48b6eb1bcf3f8a7")
+DUNE_API_KEY = st.secrets.get("DUNE_API_KEY", "FVcUCl0ojdQWxpUzB2pl11A3fDr5aRGv")
 
 # Fetch Binance OHLCV
 @st.cache_data(ttl=300)
 def fetch_binance_ohlcv(symbol, interval, limit=100):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    response = requests.get(url)
-    data = response.json()
-    df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume', 'number_of_trades', 'taker_buy_base', 'taker_buy_quote', 'ignore'])
-    for col in ['open', 'high', 'low', 'close', 'volume']:
-        df[col] = df[col].astype(float)
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    return df
+    try:
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume', 'number_of_trades', 'taker_buy_base', 'taker_buy_quote', 'ignore'])
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df[col].astype(float)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        return df
+    except Exception as e:
+        st.error(f"Error fetching Binance data: {e}")
+        return pd.DataFrame()
 
 # Apply indicators
 def apply_indicators(df):
-    df['ema20'] = ta.trend.EMAIndicator(df['close'], 20).ema_indicator()
-    df['ema50'] = ta.trend.EMAIndicator(df['close'], 50).ema_indicator()
-    df['rsi'] = ta.momentum.RSIIndicator(df['close'], 14).rsi()
-    macd = ta.trend.MACD(df['close'])
-    df['macd'], df['macd_signal'] = macd.macd(), macd.macd_signal()
-    df['atr'] = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close'], window=14).average_true_range()
-    df['adx'] = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14).adx()
-    # True Supertrend
-    df['upperband'] = ((df['high'] + df['low']) / 2) + (3 * df['atr'])
-    df['lowerband'] = ((df['high'] + df['low']) / 2) - (3 * df['atr'])
-    df['supertrend'] = df['close'].copy()
-    for i in range(1, len(df)):
-        df['supertrend'].iloc[i] = df['lowerband'].iloc[i] if df['close'].iloc[i-1] > df['upperband'].iloc[i-1] else df['upperband'].iloc[i]
-    return df
+    if df.empty:
+        return df
+    try:
+        df['ema20'] = ta.trend.EMAIndicator(df['close'], 20).ema_indicator()
+        df['ema50'] = ta.trend.EMAIndicator(df['close'], 50).ema_indicator()
+        df['rsi'] = ta.momentum.RSIIndicator(df['close'], 14).rsi()
+        macd = ta.trend.MACD(df['close'])
+        df['macd'], df['macd_signal'] = macd.macd(), macd.macd_signal()
+        df['atr'] = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close'], window=14).average_true_range()
+        df['adx'] = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14).adx()
+        # True Supertrend
+        df['upperband'] = ((df['high'] + df['low']) / 2) + (3 * df['atr'])
+        df['lowerband'] = ((df['high'] + df['low']) / 2) - (3 * df['atr'])
+        df['supertrend'] = df['close'].copy()
+        for i in range(1, len(df)):
+            df['supertrend'].iloc[i] = df['lowerband'].iloc[i] if df['close'].iloc[i-1] > df['upperband'].iloc[i-1] else df['upperband'].iloc[i]
+        return df
+    except Exception as e:
+        st.error(f"Error applying indicators: {e}")
+        return df
 
 # Detect engulfing
 def detect_engulfing(df):
     if len(df) < 2:
         return None
-    last, prev = df.iloc[-1], df.iloc[-2]
-    if (last['close'] > last['open'] and prev['close'] < prev['open'] and 
-        last['close'] > prev['open'] and last['open'] < prev['close']):
-        return 'bullish'
-    if (last['close'] < last['open'] and prev['close'] > prev['open'] and 
-        last['open'] > prev['close'] and last['close'] < prev['open']):
-        return 'bearish'
-    return None
+    try:
+        last, prev = df.iloc[-1], df.iloc[-2]
+        if (last['close'] > last['open'] and prev['close'] < prev['open'] and 
+            last['close'] > prev['open'] and last['open'] < prev['close']):
+            return 'bullish'
+        if (last['close'] < last['open'] and prev['close'] > prev['open'] and 
+            last['open'] > prev['close'] and last['close'] < prev['open']):
+            return 'bearish'
+        return None
+    except:
+        return None
 
-# News sentiment
+# News sentiment with Hugging Face
 async def fetch_news_sentiment():
     url = f"https://cryptopanic.com/api/v1/posts/?auth_token={CRYPTOPANIC_API_KEY}¤cies=BTC&public=true"
     try:
         sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
+            async with session.get(url, timeout=10) as resp:
+                resp.raise_for_status()
                 data = await resp.json()
                 headlines = [post['title'] for post in data['results'][:10]]
                 score = 0
@@ -76,23 +91,38 @@ async def fetch_news_sentiment():
         st.warning(f"News sentiment failed: {e}. Using neutral score.")
         return 0, []
 
-# On-chain data (placeholder)
+# Dune Analytics for on-chain data (exchange netflow)
 async def fetch_onchain_data():
-    return 0  # Replace with Glassnode API call if key available
+    try:
+        url = "https://api.dune.com/api/v1/query/1234567/execute"  # Replace with your Dune query ID
+        headers = {"X-Dune-API-Key": DUNE_API_KEY}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, timeout=10) as resp:
+                resp.raise_for_status()
+                execution_id = (await resp.json())['execution_id']
+            result_url = f"https://api.dune.com/api/v1/execution/{execution_id}/results"
+            async with session.get(result_url, headers=headers, timeout=10) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                netflow = data['result']['rows'][-1].get('netflow', 0)  # Adjust based on query
+                return 1 if netflow < -100000 else -1 if netflow > 100000 else 0
+    except Exception as e:
+        st.warning(f"On-chain data failed: {e}. Using neutral score.")
+        return 0
 
 # Prepare ML features
 def prepare_features(df_5m, df_1h, df_4h, news_score, onchain_score):
     engulf = 1 if detect_engulfing(df_5m) == 'bullish' else -1 if detect_engulfing(df_5m) == 'bearish' else 0
     features = {
-        'rsi': df_5m['rsi'].iloc[-1],
-        'macd': df_5m['macd'].iloc[-1],
-        'macd_signal': df_5m['macd_signal'].iloc[-1],
-        'atr': df_5m['atr'].iloc[-1],
-        'adx': df_5m['adx'].iloc[-1],
-        'supertrend': 1 if df_5m['close'].iloc[-1] < df_5m['supertrend'].iloc[-1] else -1,
+        'rsi': df_5m['rsi'].iloc[-1] if not df_5m.empty else 50,
+        'macd': df_5m['macd'].iloc[-1] if not df_5m.empty else 0,
+        'macd_signal': df_5m['macd_signal'].iloc[-1] if not df_5m.empty else 0,
+        'atr': df_5m['atr'].iloc[-1] if not df_5m.empty else 0,
+        'adx': df_5m['adx'].iloc[-1] if not df_5m.empty else 20,
+        'supertrend': 1 if not df_5m.empty and df_5m['close'].iloc[-1] < df_5m['supertrend'].iloc[-1] else -1,
         'engulfing': engulf,
-        'ema_diff_1h': df_1h['ema20'].iloc[-1] - df_1h['ema50'].iloc[-1],
-        'ema_diff_4h': df_4h['ema20'].iloc[-1] - df_4h['ema50'].iloc[-1],
+        'ema_diff_1h': (df_1h['ema20'].iloc[-1] - df_1h['ema50'].iloc[-1]) if not df_1h.empty else 0,
+        'ema_diff_4h': (df_4h['ema20'].iloc[-1] - df_4h['ema50'].iloc[-1]) if not df_4h.empty else 0,
         'news_score': news_score,
         'onchain_score': onchain_score
     }
@@ -101,19 +131,25 @@ def prepare_features(df_5m, df_1h, df_4h, news_score, onchain_score):
 # Train ML model
 @st.cache_resource
 def train_ml_model(df_5m, df_1h, df_4h, news_score):
-    X = pd.DataFrame()
-    for i in range(20, len(df_5m)-3):
-        row = prepare_features(df_5m.iloc[:i+1], df_1h, df_4h, news_score, 0)
-        X = pd.concat([X, row], ignore_index=True)
-    y = (df_5m['close'].shift(-3) > df_5m['close']).iloc[20:-3].astype(int)
-    if len(X) > 0 and len(X) == len(y):
-        model = XGBClassifier(n_estimators=50, random_state=42)
-        model.fit(X, y)
-        return model
-    return None
+    try:
+        X = pd.DataFrame()
+        for i in range(20, len(df_5m)-3):
+            row = prepare_features(df_5m.iloc[:i+1], df_1h, df_4h, news_score, 0)
+            X = pd.concat([X, row], ignore_index=True)
+        y = (df_5m['close'].shift(-3) > df_5m['close']).iloc[20:-3].astype(int)
+        if len(X) > 0 and len(X) == len(y):
+            model = XGBClassifier(n_estimators=50, random_state=42)
+            model.fit(X, y)
+            return model
+        return None
+    except Exception as e:
+        st.error(f"ML model training failed: {e}")
+        return None
 
 # Dynamic threshold
 def dynamic_threshold(df_5m):
+    if df_5m.empty:
+        return 0.8
     adx = df_5m['adx'].iloc[-1]
     atr = df_5m['atr'].iloc[-1]
     base_threshold = 0.8
@@ -125,7 +161,7 @@ def dynamic_threshold(df_5m):
 
 # Generate signal
 def ml_signal(df_5m, df_1h, df_4h, news_score, onchain_score, model):
-    if model is None:
+    if model is None or df_5m.empty:
         return 'WAIT', 0.5
     features = prepare_features(df_5m, df_1h, df_4h, news_score, onchain_score)
     prob = model.predict_proba(features)[0][1]
@@ -154,7 +190,7 @@ async def main():
         signal = 'WAIT'
     
     # Risk management
-    last = df_5m.iloc[-1]
+    last = df_5m.iloc[-1] if not df_5m.empty else {'close': 0, 'atr': 0}
     sl = last['close'] - 2 * last['atr'] if signal == 'BUY' else last['close'] + 2 * last['atr'] if signal == 'SELL' else None
     tp = last['close'] + 4 * last['atr'] if signal == 'BUY' else last['close'] - 4 * last['atr'] if signal == 'SELL' else None
     
@@ -162,26 +198,35 @@ async def main():
     col1, col2 = st.columns([2, 1])
     with col1:
         st.subheader("📊 Candlestick Chart")
-        fig = go.Figure(data=[
-            go.Candlestick(x=df_5m['timestamp'], open=df_5m['open'], high=df_5m['high'], low=df_5m['low'], close=df_5m['close']),
-            go.Scatter(x=df_5m['timestamp'], y=df_5m['supertrend'], name="Supertrend", line=dict(color='purple'))
-        ])
-        st.plotly_chart(fig, use_container_width=True)
+        if not df_5m.empty:
+            fig = go.Figure(data=[
+                go.Candlestick(x=df_5m['timestamp'], open=df_5m['open'], high=df_5m['high'], low=df_5m '
+
+System: low', close=df_5m['close']),
+                go.Scatter(x=df_5m['timestamp'], y=df_5m['supertrend'], name="Supertrend", line=dict(color='purple'))
+            ])
+            fig.update_layout(xaxis_rangeslider_visible=False)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("No chart data available.")
     
     with col2:
         st.subheader("📢 Trading Signal")
         st.markdown(f"**Signal**: {signal} (Confidence: {prob:.2%})")
         st.markdown(f"**Price**: ${last['close']:.2f}")
-        if signal != 'WAIT':
+        if signal != 'WAIT' and sl is not None and tp is not None:
             st.markdown(f"**Stop Loss**: ${sl:.2f}")
             st.markdown(f"**Take Profit**: ${tp:.2f}")
-        st.markdown(f"**RSI**: {last['rsi']:.2f}")
-        st.markdown(f"**MACD**: {last['macd']:.4f}")
+        st.markdown(f"**RSI**: {last.get('rsi', 0):.2f}")
+        st.markdown(f"**MACD**: {last.get('macd', 0):.4f}")
         st.markdown(f"**News Sentiment**: {news_score:.2f}")
         st.markdown(f"**On-Chain Score**: {onchain_score}")
         st.markdown("**Top News**:")
-        for h in headlines[:5]:
-            st.markdown(f"- {h}")
+        if headlines:
+            for h in headlines[:5]:
+                st.markdown(f"- {h}")
+        else:
+            st.markdown("- No news available.")
     
     st.markdown(f"**Last Updated**: {datetime.datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S IST')}")
     st.button("🔄 Refresh")
