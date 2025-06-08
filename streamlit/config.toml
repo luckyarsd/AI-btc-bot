@@ -22,7 +22,7 @@
     fastReruns = false
     installTracer = false
 
-    # Explicitly set a compatible Python version
-    # Python 3.12 is generally more stable for libraries like pandas_ta and numpy
-    python_version = "3.12"
+    # Explicitly set a compatible Python version for pandas_ta
+    # pandas_ta version 0.3.14b requires Python <3.12, so 3.11 is chosen.
+    python_version = "3.11"
     
