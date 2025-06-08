@@ -1,10 +1,18 @@
-# BTC/USDT Trading Dashboard
+BTC/USDT Trading Dashboard
+Streamlit app for live BTC/USDT trading signals, aiming for >80% accuracy using XGBoost, Supertrend, and dynamic thresholds.
+Setup
 
-A Streamlit-based web dashboard for live BTC/USDT trading signals, aiming for >80% accuracy in trending markets. Integrates machine learning (XGBoost), news sentiment (Hugging Face NLP), on-chain data (Dune Analytics), true Supertrend, and dynamic thresholds (ADX/ATR).
+Install: pip install -r requirements.txt
+Add API key to Streamlit secrets:CRYPTOPANIC_API_KEY = "your_cryptopanic_api_key"
 
-## Setup Instructions
 
-1. **Clone Repository**:
-   ```bash
-   git clone https://github.com/your-username/btc-trading-dashboard.git
-   cd btc-trading-dashboard
+Configure proxies in app.py (replace us-proxy:8080, eu-proxy:8080 with real proxy URLs).
+Run: streamlit run app.py
+Deploy to Streamlit Cloud via GitHub.
+
+Notes
+
+Binance API may return 451 errors if hosted in restricted regions (e.g., US). Use proxies to bypass.
+Dune Analytics integration pending; add query ID to fetch_onchain_data later.
+Backtest for >80% accuracy using backtrader.
+
