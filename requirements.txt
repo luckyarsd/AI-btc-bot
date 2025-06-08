@@ -6,4 +6,3 @@ pandas
 scikit-learn
 numpy
 pandas_ta
-pkg_resources
